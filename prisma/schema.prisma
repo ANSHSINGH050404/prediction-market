@@ -1,0 +1,151 @@
+// ============================================================
+//  Prisma Schema — Gamified Prediction Market (India)
+//  Virtual-points only, no real money involved.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// NextAuth / Auth.js required tables
+// ---------------------------------------------------------------------------
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Core User model — extended for gamification
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // --- Gamification fields ---
+  /// Virtual-points balance (starts at 0, daily claim adds 100)
+  points         Int       @default(0)
+  /// Number of consecutive days the user has claimed their daily reward
+  streakCount    Int       @default(0)
+  /// Timestamp of the last successful daily reward claim (null = never claimed)
+  lastDailyClaim DateTime?
+
+  // --- Relations ---
+  accounts Account[]
+  sessions Session[]
+  bets     Bet[]
+
+  @@index([points]) // speeds up leaderboard queries
+}
+
+// ---------------------------------------------------------------------------
+// Prediction Market models
+// ---------------------------------------------------------------------------
+
+/// A single prediction market / question
+model Market {
+  id          String       @id @default(cuid())
+  title       String
+  description String       @db.Text
+  /// Optional URL or text blurb used by the AI resolution agent
+  newsSummary String?      @db.Text
+  status      MarketStatus @default(OPEN)
+  closesAt    DateTime
+  resolvedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  outcomes   Outcome[]
+  resolution Resolution?
+}
+
+enum MarketStatus {
+  OPEN
+  CLOSED
+  RESOLVED
+}
+
+/// A possible outcome for a market (e.g. "Yes" / "No" or team names)
+model Outcome {
+  id       String @id @default(cuid())
+  marketId String
+  label    String // e.g. "Yes", "No", "Team India"
+
+  /// Running total of points wagered on this outcome — used for price calculation
+  totalPoints Int @default(0)
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  bets   Bet[]
+
+  @@index([marketId])
+}
+
+/// A single bet placed by a user on a particular outcome
+model Bet {
+  id        String   @id @default(cuid())
+  userId    String
+  outcomeId String
+  points    Int // points wagered
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outcome Outcome @relation(fields: [outcomeId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([outcomeId])
+}
+
+/// Stores the AI agent's resolution decision for a market
+model Resolution {
+  id         String   @id @default(cuid())
+  marketId   String   @unique
+  winnerId   String // Outcome.id that won
+  confidence Float // 0.0 – 1.0
+  reasoning  String   @db.Text
+  createdAt  DateTime @default(now())
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+}
