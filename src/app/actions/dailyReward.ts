@@ -14,7 +14,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,7 @@ function startOfNextUTCDay(from: Date): Date {
 
 export async function claimDailyReward(): Promise<ClaimResult> {
   // 1. Authenticate
-  const session = await auth();
+  const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return { success: false, alreadyClaimed: false, error: "Unauthenticated" };
   }
